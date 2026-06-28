@@ -1,92 +1,49 @@
 import streamlit as st
 from PIL import Image
 import io
-import base64
+from streamlit_paste_uploader import paste_uploader
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Image as RLImage, Spacer
 
 st.set_page_config(page_title="Incolla e Stampa Immagini", layout="centered")
 
 st.title("📸 Cattura, Incolla e Stampa")
-st.write("Fai uno screenshot con `Win + Shift + S`, poi clicca nella pagina e premi **CTRL+V**.")
+st.write("Fai uno screenshot con `Win + Shift + S`, clicca nel riquadro sotto e premi **CTRL+V**.")
 
-# Inizializziamo l'archivio immagini se non esiste
+# Inizializziamo l'archivio immagini se non esiste nella sessione
 if "archivio_immagini" not in st.session_state:
     st.session_state.archivio_immagini = []
 
-# --- IL TRUCCO DEFINITIVO: JAVASCRIPT NATIVO ---
-# Questo codice dice al browser: "Se l'utente incolla un'immagine ovunque, catturala!"
-# Usiamo i query_params di Streamlit per mandare l'immagine da JavaScript a Python in modo istantaneo.
-
-st.components.v1.html(
-    """
-    <script>
-    document.addEventListener('paste', function (e) {
-        var items = (e.clipboardData || e.originalEvent.clipboardData).items;
-        for (var index in items) {
-            var item = items[index];
-            if (item.kind === 'file') {
-                var blob = item.getAsFile();
-                var reader = new FileReader();
-                reader.onload = function (event) {
-                    // Inviamo i dati dell'immagine direttamente a Streamlit
-                    window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: event.target.result
-                    }, '*');
-                };
-                reader.readAsDataURL(blob);
-            }
-        }
-    });
-    </script>
-    """,
-    height=0,
+# Questo componente crea una vera area compatibile con il Ctrl+V del browser
+immagine_incollata = paste_uploader(
+    "📋 Clicca qui dentro e premi CTRL+V per aggiungere lo screenshot",
+    key="incollatore_appunti"
 )
 
-# Un piccolo espediente per catturare l'output del componente JS qui sopra
-# Usiamo un text_input invisibile gestito da un componente personalizzato integrato
-if "img_incollata_base64" not in st.session_state:
-    st.session_state.img_incollata_base64 = None
+# Se viene rilevata una nuova immagine dagli appunti
+if immagine_incollata is not None:
+    # Apriamo l'immagine per estrarne i byte
+    img = Image.open(immagine_incollata)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    dati_bytes = buf.getvalue()
+    
+    # Evitiamo di duplicarla se l'utente non cambia screenshot
+    if not st.session_state.archivio_immagini or st.session_state.archivio_immagini[-1]["bytes"] != dati_bytes:
+        st.session_state.archivio_immagini.append({"bytes": dati_bytes})
+        st.toast("✅ Immagine salvata in lista!", icon="🔥")
+        st.rerun()
 
-# Sfruttiamo il valore di ritorno del frame usando l'approccio classico delle query o un trucco nativo
-# Per evitare complicazioni, usiamo il widget nativo che reagisce al Ctrl+V se cliccato, ma potenziato:
-input_testo = st.text_input("⚠️ [CLICCA QUI PRIMA DI FARE CTRL+V]", placeholder="Clicca qui dentro in modo che lampeggi la barra, poi premi CTRL+V")
-
-# Se il browser incolla l'immagine trasformatasi in testo (Base64) o se riusciamo a catturarla:
-if input_testo and input_testo.startswith("data:image"):
-    try:
-        header, encoded = input_testo.split(",", 1)
-        data = base64.b64decode(encoded)
-        if data not in [img['bytes'] for img in st.session_state.archivio_immagini]:
-            st.session_state.archivio_immagini.append({"bytes": data})
-            st.toast("✅ Immagine aggiunta!")
-    except:
-        pass
-
-# --- ALTERNATIVA 100% FUNZIONANTE SE IL TUO BROWSER BLOCCA IL CTRL+V ---
-st.markdown("---")
-file_caricati = st.file_uploader(
-    "🔄 Se il Ctrl+V viene bloccato dal tuo browser, trascina semplicemente lo screenshot qui dentro:", 
-    type=["png", "jpg", "jpeg"], 
-    accept_multiple_files=True
-)
-
-if file_caricati:
-    for f in file_caricati:
-        f.seek(0)
-        dati_file = f.read()
-        if dati_file not in [img['bytes'] for img in st.session_state.archivio_immagini]:
-            st.session_state.archivio_immagini.append({"bytes": dati_file})
-
-# --- MOSTRIAMO LE IMMAGINI SALVATE ---
+# Se ci sono immagini nell'archivio, mostriamo la gestione e la stampa
 if st.session_state.archivio_immagini:
-    st.subheader(f"📋 Immagini pronte per la stampa ({len(st.session_state.archivio_immagini)})")
+    st.markdown("---")
+    st.subheader(f"📋 Immagini pronte per il PDF ({len(st.session_state.archivio_immagini)})")
     
     if st.button("❌ Svuota tutto e ricomincia"):
         st.session_state.archivio_immagini = []
         st.rerun()
         
+    # Anteprime a schermo
     for i, img_data in enumerate(st.session_state.archivio_immagini):
         img = Image.open(io.BytesIO(img_data["bytes"]))
         st.image(img, caption=f"Immagine {i+1}", use_container_width=True)
