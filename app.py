@@ -1,110 +1,61 @@
 import streamlit as st
 from PIL import Image
 import io
-import base64
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Image as RLImage, Spacer
 
 st.set_page_config(page_title="Incolla e Stampa Immagini", layout="centered")
 
 st.title("📸 Cattura, Incolla e Stampa")
-st.write("Fai uno screenshot con `Win + Shift + S` e premi **CTRL+V** in un punto qualsiasi di questa pagina!")
+st.write("Crea la tua lista di screenshot e stampali in un unico PDF.")
 
-# Inizializziamo l'archivio in memoria se non esiste
+# Inizializziamo l'archivio in memoria
 if "archivio_immagini" not in st.session_state:
     st.session_state.archivio_immagini = []
 
-# --- TRUCCO JAVASCRIPT PER IL CTRL+V GLOBALE ---
-# Questo script cattura l'evento "paste" del browser in qualsiasi punto della pagina
-# e invia l'immagine a Streamlit tramite un input nascosto.
-import streamlit.components.v1 as components
+# Spiegazione semplice su come usare il Ctrl+V senza far aprire le cartelle
+st.info("""
+💡 **Come incollare velocemente:**
+1. Fai lo screenshot con **Win + Shift + S**.
+2. Fai un **singolo click** nel box grigio qui sotto (se si apre la finestra di Windows, premi subito il tasto **ESC** sulla tastiera per chiuderla).
+3. Premi **CTRL + V** sulla tastiera. L'immagine apparirà in elenco!
+""")
 
-# Componente invisibile che ascolta il Ctrl+V
-immagini_incollate_js = components.html(
-    """
-    <script>
-    document.addEventListener('paste', function (e) {
-        var items = (e.clipboardData || e.originalEvent.clipboardData).items;
-        for (var index in items) {
-            var item = items[index];
-            if (item.kind === 'file') {
-                var blob = item.getAsFile();
-                var reader = new FileReader();
-                reader.onload = function (event) {
-                    // Inviamo i dati base64 dell'immagine a Streamlit
-                    window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: event.target.result
-                    }, '*');
-                };
-                reader.readAsDataURL(blob);
-            }
-        }
-    });
-    </script>
-    """,
-    height=0, # Lo teniamo invisibile
+# Caricatore nativo standard (accetta file multipli e Ctrl+V)
+file_caricati = st.file_uploader(
+    "Area di Incollo / Caricamento", 
+    type=["png", "jpg", "jpeg"], 
+    accept_multiple_files=True
 )
 
-# Funzione per gestire i dati ricevuti da JavaScript
-# Usiamo un trucco con un bando di testo invisibile per catturare il valore del componente JS
-if "last_js_data" not in st.session_state:
-    st.session_state.last_js_data = None
-
-# Monitoriamo se JavaScript ha inviato una nuova immagine negli appunti
-# Poiché Streamlit inserisce i dati dei componenti in finestre isolate, usiamo un trucco nativo più semplice:
-# st.experimental_data_editor o simili non servono, usiamo st.chat_input o un trucco di query params, 
-# ma per massima stabilità ed evitare bug complessi, ecco l'approccio nativo ad area di testo focalizzata automaticamente:
-
-st.markdown("""
-    <style>
-    /* Rendiamo l'area di testo gigante così è impossibile non fare focus */
-    .stTextArea textarea {
-        background-color: #f0f2f6 !important;
-        border: 2px dashed #ff4b4b !important;
-        height: 100px !important;
-    }
-    </style>
-""", unsafe_allow_index=True)
-
-st.subheader("👇 Clicca una volta qui dentro (diventerà attiva), poi fai CTRL+V")
-testo_incollo = st.text_area("Zona di Incollo Rapido", placeholder="Clicca qui e premi CTRL+V... Puoi farlo quante volte vuoi!", label_visibility="collapsed")
-
-# Se l'utente usa l'uploader classico come alternativa solida
-file_caricati = st.file_uploader("Oppure trascina i file qui manualmente:", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-
+# Salva i file nell'archivio persistente
 if file_caricati:
     for f in file_caricati:
         f.seek(0)
         dati_file = f.read()
+        # Evita duplicati controllando se i byte sono già salvati
         if dati_file not in [img['bytes'] for img in st.session_state.archivio_immagini]:
-            st.session_state.archivio_immagini.append({"bytes": dati_file})
+            st.session_state.archivio_immagini.append({
+                "bytes": dati_file,
+                "name": f.name
+            })
 
-# Gestione dell'incollo tramite l'area di testo (molti browser inseriscono l'immagine come file se l'area ha il focus)
-# Per catturare l'immagine direttamente dagli appunti in modo stabile senza widget complessi, 
-# la cosa migliore in assoluto è usare il caricatore classico ma EVITANDO di cliccarci sopra:
-# TI BASTA TRASCINARE L'IMMAGINE DALLO STRUMENTO DI CATTURA (se supportato) o salvare.
-
-# Se però vuoi SOLO il Ctrl+V puro, l'uploader di Streamlit ACCETTA il Ctrl+V se:
-# 1. Clicchi sulla pagina vuota.
-# 2. Premi Ctrl+V.
-# Se prima non ti funzionava, era perché la lista si resettava. Con questo codice l'archivio è PERMANENTE.
-
-# Mostra l'archivio delle immagini
+# Se ci sono immagini salvate nell'archivio
 if st.session_state.archivio_immagini:
     st.markdown("---")
-    st.subheader(f"📋 Immagini pronte per il PDF ({len(st.session_state.archivio_immagini)})")
+    st.subheader(f"📋 Immagini pronte ({len(st.session_state.archivio_immagini)})")
     
     if st.button("❌ Svuota tutto e ricomincia"):
         st.session_state.archivio_immagini = []
         st.rerun()
         
+    # Mostra le anteprime
     for i, img_data in enumerate(st.session_state.archivio_immagini):
         img = Image.open(io.BytesIO(img_data["bytes"]))
         st.image(img, caption=f"Immagine {i+1}", use_container_width=True)
         
     st.markdown("---")
-    st.subheader("🖨️ Genera il tuo file per la stampa")
+    st.subheader("🖨️ Crea il PDF per la stampa")
     orientamento = st.radio("Orientamento foglio:", ["Verticale (Portrait)", "Orizzontale (Landscape)"])
     
     if st.button("✨ Genera PDF"):
@@ -144,5 +95,3 @@ if st.session_state.archivio_immagini:
             file_name="immagini_stampa.pdf",
             mime="application/pdf"
         )
-else:
-    st.info("Fai una cattura schermo. Poi, seleziona il box grigio del file uploader (senza cliccare sul tasto 'Browse') o l'area di testo e premi Ctrl+V.")
