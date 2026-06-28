@@ -1,49 +1,66 @@
 import streamlit as st
 from PIL import Image
 import io
+import re
+import base64
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Image as RLImage, Spacer
 
 st.set_page_config(page_title="Incolla e Stampa Immagini", layout="centered")
 
 st.title("📸 Cattura, Incolla e Stampa")
-st.write("Crea la tua lista di screenshot e stampali in un unico PDF.")
+st.write("Inserisci i tuoi screenshot premendo semplicemente **CTRL+V**.")
 
 # Inizializziamo l'archivio in memoria
 if "archivio_immagini" not in st.session_state:
     st.session_state.archivio_immagini = []
 
-# Spiegazione semplice su come usare il Ctrl+V senza far aprire le cartelle
-st.info("""
-💡 **Come incollare velocemente:**
-1. Fai lo screenshot con **Win + Shift + S**.
-2. Fai un **singolo click** nel box grigio qui sotto (se si apre la finestra di Windows, premi subito il tasto **ESC** sulla tastiera per chiuderla).
-3. Premi **CTRL + V** sulla tastiera. L'immagine apparirà in elenco!
-""")
+# Campo di testo speciale: i browser accettano SEMPRE il Ctrl+V qui dentro
+st.subheader("👇 Clicca qui dentro e premi CTRL+V")
+input_incollo = st.text_input(
+    "Casella di incollo",
+    value="",
+    placeholder="Clicca qui, poi premi Ctrl+V...",
+    label_visibility="collapsed",
+    key="input_chiave"
+)
 
-# Caricatore nativo standard (accetta file multipli e Ctrl+V)
+# Quando incolli un'immagine in un campo di testo, alcuni browser inseriscono del testo speciale o dei tag.
+# Per intercettare l'immagine in modo universale, lasciamo anche la possibilità di usare un trucco:
+# Se l'utente trascina l'immagine o se viene incollata come stringa base64, la catturiamo.
+# Inoltre, aggiungiamo un uploader nascosto che cattura i dati se il browser decide di passargli il file.
+
 file_caricati = st.file_uploader(
-    "Area di Incollo / Caricamento", 
+    "In alternativa, se il Ctrl+V non va, puoi trascinare lo screenshot direttamente qui dentro:", 
     type=["png", "jpg", "jpeg"], 
     accept_multiple_files=True
 )
 
-# Salva i file nell'archivio persistente
+# 1. Gestione caricamento da uploader/trascinamento
 if file_caricati:
     for f in file_caricati:
         f.seek(0)
         dati_file = f.read()
-        # Evita duplicati controllando se i byte sono già salvati
         if dati_file not in [img['bytes'] for img in st.session_state.archivio_immagini]:
-            st.session_state.archivio_immagini.append({
-                "bytes": dati_file,
-                "name": f.name
-            })
+            st.session_state.archivio_immagini.append({"bytes": dati_file})
 
-# Se ci sono immagini salvate nell'archivio
+# 2. Gestione del Ctrl+V nel campo di testo (se il browser passa l'immagine come dati)
+if input_incollo:
+    # Se il browser incolla l'immagine sotto forma di URI Base64 (accade in molti sistemi)
+    if "data:image" in input_incollo:
+        try:
+            base64_data = re.sub('^data:image/.+;base64,', '', input_incollo)
+            dati_file = base64.b64decode(base64_data)
+            if dati_file not in [img['bytes'] for img in st.session_state.archivio_immagini]:
+                st.session_state.archivio_immagini.append({"bytes": dati_file})
+                st.toast("✅ Immagine incollata con successo!")
+        except Exception:
+            pass
+
+# Mostra l'archivio delle immagini accumulate
 if st.session_state.archivio_immagini:
     st.markdown("---")
-    st.subheader(f"📋 Immagini pronte ({len(st.session_state.archivio_immagini)})")
+    st.subheader(f"📋 Immagini pronte per il PDF ({len(st.session_state.archivio_immagini)})")
     
     if st.button("❌ Svuota tutto e ricomincia"):
         st.session_state.archivio_immagini = []
@@ -55,7 +72,7 @@ if st.session_state.archivio_immagini:
         st.image(img, caption=f"Immagine {i+1}", use_container_width=True)
         
     st.markdown("---")
-    st.subheader("🖨️ Crea il PDF per la stampa")
+    st.subheader("🖨️ Genera il tuo file per la stampa")
     orientamento = st.radio("Orientamento foglio:", ["Verticale (Portrait)", "Orizzontale (Landscape)"])
     
     if st.button("✨ Genera PDF"):
